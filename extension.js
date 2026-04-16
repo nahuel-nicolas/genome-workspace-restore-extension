@@ -53,7 +53,7 @@ function saveState() {
 async function loadState() {
     try {
         const file = Gio.File.new_for_path(STATE_FILE);
-        const [, contents] = await file.load_contents_async(null);
+        const [contents] = await file.load_contents_async(null);
         return JSON.parse(new TextDecoder().decode(contents));
     } catch(e) { return null; }
 }
