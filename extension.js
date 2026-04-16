@@ -60,14 +60,12 @@ async function loadState() {
 
 export default class WorkspaceRestoreExtension {
     #restoreTimerId = null;
-    #focusTimerId = null;
     #disabled = false;
 
     async enable() {
         this.#disabled = false;
         const state = await loadState();
 
-        // Bail if disable() was called while awaiting the file load
         if (this.#disabled || !state) return;
 
         let twm = null;
@@ -79,10 +77,9 @@ export default class WorkspaceRestoreExtension {
                 ({ Rect } = await import(`file://${taExt.path}/src/extension/utility.js`));
             }
         } catch(e) {
-            console.warn('[workspace-restore] tiling-assistant unavailable, using fallback:', e.message);
+            console.warn('[workspace-restore] tiling-assistant unavailable:', e.message);
         }
 
-        // Bail if disable() was called while awaiting the import
         if (this.#disabled) return;
 
         this.#restoreTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1200, () => {
@@ -133,12 +130,11 @@ export default class WorkspaceRestoreExtension {
             // Re-raise focused window after a short delay to win against async maximize
             const focusedWin = state.focusedId ? winMap.get(state.focusedId) : null;
             if (focusedWin && !focusedWin.minimized) {
-                this.#focusTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
                     if (focusedWin.raise_and_make_recent_on_workspace)
                         focusedWin.raise_and_make_recent_on_workspace(global.workspace_manager.get_active_workspace());
                     else
                         focusedWin.raise_and_make_recent();
-                    this.#focusTimerId = null;
                     return GLib.SOURCE_REMOVE;
                 });
             }
@@ -155,10 +151,6 @@ export default class WorkspaceRestoreExtension {
         if (this.#restoreTimerId !== null) {
             GLib.source_remove(this.#restoreTimerId);
             this.#restoreTimerId = null;
-        }
-        if (this.#focusTimerId !== null) {
-            GLib.source_remove(this.#focusTimerId);
-            this.#focusTimerId = null;
         }
     }
 }
