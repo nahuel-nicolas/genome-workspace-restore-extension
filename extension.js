@@ -58,6 +58,7 @@ function loadState() {
 
 export default class WorkspaceRestoreExtension {
     #restoreTimerId = null;
+    #focusTimerId = null;
     #disabled = false;
 
     async enable() {
@@ -129,11 +130,12 @@ export default class WorkspaceRestoreExtension {
             // Re-raise focused window after a short delay to win against async maximize
             const focusedWin = state.focusedId ? winMap.get(state.focusedId) : null;
             if (focusedWin && !focusedWin.minimized) {
-                GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                this.#focusTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
                     if (focusedWin.raise_and_make_recent_on_workspace)
                         focusedWin.raise_and_make_recent_on_workspace(global.workspace_manager.get_active_workspace());
                     else
                         focusedWin.raise_and_make_recent();
+                    this.#focusTimerId = null;
                     return GLib.SOURCE_REMOVE;
                 });
             }
@@ -150,6 +152,10 @@ export default class WorkspaceRestoreExtension {
         if (this.#restoreTimerId !== null) {
             GLib.source_remove(this.#restoreTimerId);
             this.#restoreTimerId = null;
+        }
+        if (this.#focusTimerId !== null) {
+            GLib.source_remove(this.#focusTimerId);
+            this.#focusTimerId = null;
         }
     }
 }
