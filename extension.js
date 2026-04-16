@@ -97,44 +97,55 @@ export default class WorkspaceRestoreExtension {
                 if (isNormalWindow(win)) winMap.set(win.get_id(), win);
             }
 
-            // state.windows is top-to-bottom (focused first). Process in reverse so
-            // the focused window is raised last and ends up on top.
-            const ordered = [...state.windows].reverse();
+            // Process focused window last so it ends up on top after all raises
+            const ordered = [
+                ...state.windows.filter(w => w.id !== state.focusedId),
+                ...state.windows.filter(w => w.id === state.focusedId),
+            ];
+
+            const dbg = { focusedId: state.focusedId, order: [] };
 
             for (const saved of ordered) {
                 const win = winMap.get(saved.id);
                 if (!win) continue;
 
+                const title = win.get_title();
+                const isFocused = saved.id === state.focusedId;
+                let action = '';
+
                 if (win.get_maximized()) win.unmaximize(Meta.MaximizeFlags.BOTH);
 
                 if (saved.maximized) {
                     win.maximize(saved.maximized);
+                    action = 'maximize';
                 } else if (saved.isTiled && twm && Rect && saved.tiledRect) {
-                    // Non-focused tiled windows: fakeTile=true positions without connecting
-                    // tile-group raise signals, avoiding z-order cascade. The focused tiled
-                    // window (processed last) gets a full tile() which builds the group and
-                    // raises it on top cleanly.
-                    const isFocused = saved.id === state.focusedId;
                     twm.tile(win, new Rect(saved.tiledRect), { openTilingPopup: false, skipAnim: true, fakeTile: !isFocused });
                     win.untiledRect = saved.untiledRect ? new Meta.Rectangle(saved.untiledRect) : null;
+                    action = isFocused ? 'tile(focused)' : 'tile(fakeTile)';
                 } else {
                     win.move_resize_frame(true, saved.x, saved.y, saved.width, saved.height);
                     win.isTiled = saved.isTiled;
                     win.tiledRect = saved.tiledRect ? new Meta.Rectangle(saved.tiledRect) : null;
                     win.untiledRect = saved.untiledRect ? new Meta.Rectangle(saved.untiledRect) : null;
-                    // Raise non-tiled windows explicitly; tile() handles raise internally
                     if (!saved.minimized) {
                         if (win.raise_and_make_recent_on_workspace)
                             win.raise_and_make_recent_on_workspace(global.workspace_manager.get_active_workspace());
                         else
                             win.raise_and_make_recent();
                     }
+                    action = isFocused ? 'move+raise(focused)' : 'move+raise';
                 }
 
-                // tile() calls unminimize() internally; re-minimize if needed
                 if (saved.minimized && !win.minimized) win.minimize();
                 else if (!saved.minimized && win.minimized) win.unminimize();
+
+                dbg.order.push({ id: saved.id, title, isFocused, action });
             }
+
+            try {
+                const f = Gio.File.new_for_path(GLib.get_home_dir() + '/.workspace-restore-debug.log');
+                f.replace_contents(JSON.stringify(dbg, null, 2), null, false, Gio.FileCreateFlags.REPLACE_DESTINATION, null);
+            } catch(e) {}
 
             this.#restoreTimerId = null;
             return GLib.SOURCE_REMOVE;
