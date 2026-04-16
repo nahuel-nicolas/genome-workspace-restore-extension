@@ -9,11 +9,14 @@ function rectToObj(r) {
     return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
 }
 
+function isNormalWindow(win) {
+    return !win.is_skip_taskbar() && win.get_window_type() === Meta.WindowType.NORMAL;
+}
+
 function captureState() {
     const windows = [];
     for (const win of global.display.list_all_windows()) {
-        if (win.is_skip_taskbar() || win.get_window_type() !== Meta.WindowType.NORMAL)
-            continue;
+        if (!isNormalWindow(win)) continue;
         const rect = win.get_frame_rect();
         windows.push({
             id: win.get_id(),
@@ -67,9 +70,6 @@ export default class WorkspaceRestoreExtension {
 
         if (!state) return;
 
-        // Try to load tiling-assistant's Rect class for proper tile restoration.
-        // tile() sets window.tiledRect = rect.copy() which preserves the intended
-        // dimensions even when the terminal snaps to character cell boundaries.
         let twm = null;
         let Rect = null;
         try {
@@ -82,7 +82,7 @@ export default class WorkspaceRestoreExtension {
             logError(e, '[workspace-restore] tiling-assistant unavailable, using fallback');
         }
 
-        // Bail if disable() was called while we were awaiting
+        // Bail if disable() was called while awaiting the import
         if (this.#saveTimerId === null) return;
 
         this.#restoreTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1200, () => {
@@ -91,34 +91,31 @@ export default class WorkspaceRestoreExtension {
 
             const winMap = new Map();
             for (const win of global.display.list_all_windows()) {
-                if (win.get_window_type() === Meta.WindowType.NORMAL)
-                    winMap.set(win.get_id(), win);
+                if (isNormalWindow(win)) winMap.set(win.get_id(), win);
             }
 
             for (const saved of state.windows) {
                 const win = winMap.get(saved.id);
                 if (!win) continue;
 
+                if (win.get_maximized()) win.unmaximize(Meta.MaximizeFlags.BOTH);
+
                 if (saved.maximized) {
-                    if (win.get_maximized() !== saved.maximized) {
-                        if (win.get_maximized()) win.unmaximize(Meta.MaximizeFlags.BOTH);
-                        win.maximize(saved.maximized);
-                    }
+                    win.maximize(saved.maximized);
                 } else if (saved.isTiled && twm && Rect && saved.tiledRect) {
-                    if (win.get_maximized()) win.unmaximize(Meta.MaximizeFlags.BOTH);
-                    // tile() calls unminimize() internally, so re-minimize below if needed
+                    // tile() preserves tiledRect at the intended size even when the
+                    // window snaps to character-cell boundaries (e.g. terminal emulators)
                     twm.tile(win, new Rect(saved.tiledRect), { openTilingPopup: false, skipAnim: true });
-                    win.untiledRect = saved.untiledRect
-                        ? new Meta.Rectangle(saved.untiledRect) : null;
+                    // tile() clears untiledRect; restore the saved value
+                    win.untiledRect = saved.untiledRect ? new Meta.Rectangle(saved.untiledRect) : null;
                 } else {
-                    if (win.get_maximized()) win.unmaximize(Meta.MaximizeFlags.BOTH);
-                    win.move_frame(true, saved.x, saved.y);
                     win.move_resize_frame(true, saved.x, saved.y, saved.width, saved.height);
                     win.isTiled = saved.isTiled;
                     win.tiledRect = saved.tiledRect ? new Meta.Rectangle(saved.tiledRect) : null;
                     win.untiledRect = saved.untiledRect ? new Meta.Rectangle(saved.untiledRect) : null;
                 }
 
+                // tile() calls unminimize() internally; re-minimize if needed
                 if (saved.minimized && !win.minimized) win.minimize();
                 else if (!saved.minimized && win.minimized) win.unminimize();
             }
