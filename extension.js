@@ -5,6 +5,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const STATE_FILE = GLib.get_home_dir() + '/.workspace-restore-state';
 
+Gio._promisify(Gio.File.prototype, 'load_contents_async');
+
 function rectToObj(r) {
     return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
 }
@@ -45,13 +47,13 @@ function saveState() {
         const file = Gio.File.new_for_path(STATE_FILE);
         file.replace_contents(JSON.stringify(state), null, false,
             Gio.FileCreateFlags.REPLACE_DESTINATION, null);
-    } catch(e) { logError(e, '[workspace-restore] save failed'); }
+    } catch(e) { console.error('[workspace-restore] save failed:', e.message); }
 }
 
-function loadState() {
+async function loadState() {
     try {
         const file = Gio.File.new_for_path(STATE_FILE);
-        const [, contents] = file.load_contents(null);
+        const [, contents] = await file.load_contents_async(null);
         return JSON.parse(new TextDecoder().decode(contents));
     } catch(e) { return null; }
 }
@@ -63,9 +65,10 @@ export default class WorkspaceRestoreExtension {
 
     async enable() {
         this.#disabled = false;
-        const state = loadState();
+        const state = await loadState();
 
-        if (!state) return;
+        // Bail if disable() was called while awaiting the file load
+        if (this.#disabled || !state) return;
 
         let twm = null;
         let Rect = null;
@@ -76,7 +79,7 @@ export default class WorkspaceRestoreExtension {
                 ({ Rect } = await import(`file://${taExt.path}/src/extension/utility.js`));
             }
         } catch(e) {
-            logError(e, '[workspace-restore] tiling-assistant unavailable, using fallback');
+            console.warn('[workspace-restore] tiling-assistant unavailable, using fallback:', e.message);
         }
 
         // Bail if disable() was called while awaiting the import
