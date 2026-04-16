@@ -73,10 +73,12 @@ export default class WorkspaceRestoreExtension {
 
         // Track focus in real-time so disable() always writes the current focused window,
         // even if it changed within the 10s periodic save window before locking
-        this.#lastFocusedId = global.display.focus_window?.get_id() ?? null;
+        const fw = global.display.focus_window;
+        if (fw && isNormalWindow(fw)) this.#lastFocusedId = fw.get_id();
         this.#focusSignalId = global.display.connect('notify::focus-window', () => {
-            const id = global.display.focus_window?.get_id();
-            if (id != null) this.#lastFocusedId = id;
+            const fw = global.display.focus_window;
+            // Only track normal windows — ignore null/lock-screen focus shifts on lock
+            if (fw && isNormalWindow(fw)) this.#lastFocusedId = fw.get_id();
         });
 
         if (!state) return;
