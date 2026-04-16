@@ -15,8 +15,6 @@ function isNormalWindow(win) {
 
 function captureState() {
     const windows = [];
-    // list_all_windows() returns windows top-to-bottom (focused first).
-    // Saving in this order lets restore process them in reverse to rebuild z-order.
     for (const win of global.display.list_all_windows()) {
         if (!isNormalWindow(win)) continue;
         const rect = win.get_frame_rect();
@@ -60,16 +58,11 @@ function loadState() {
 
 export default class WorkspaceRestoreExtension {
     #restoreTimerId = null;
-    #saveTimerId = null;
+    #disabled = false;
 
     async enable() {
+        this.#disabled = false;
         const state = loadState();
-
-        saveState();
-        this.#saveTimerId = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, 10, () => {
-            saveState();
-            return GLib.SOURCE_CONTINUE;
-        });
 
         if (!state) return;
 
@@ -86,7 +79,7 @@ export default class WorkspaceRestoreExtension {
         }
 
         // Bail if disable() was called while awaiting the import
-        if (this.#saveTimerId === null) return;
+        if (this.#disabled) return;
 
         this.#restoreTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1200, () => {
             const ws = global.workspace_manager.get_workspace_by_index(state.activeWs);
@@ -103,25 +96,19 @@ export default class WorkspaceRestoreExtension {
                 ...state.windows.filter(w => w.id === state.focusedId),
             ];
 
-            const dbg = { focusedId: state.focusedId, order: [] };
-
             for (const saved of ordered) {
                 const win = winMap.get(saved.id);
                 if (!win) continue;
 
-                const title = win.get_title();
                 const isFocused = saved.id === state.focusedId;
-                let action = '';
 
                 if (win.get_maximized()) win.unmaximize(Meta.MaximizeFlags.BOTH);
 
                 if (saved.maximized) {
                     win.maximize(saved.maximized);
-                    action = 'maximize';
                 } else if (saved.isTiled && twm && Rect && saved.tiledRect) {
                     twm.tile(win, new Rect(saved.tiledRect), { openTilingPopup: false, skipAnim: true, fakeTile: !isFocused });
                     win.untiledRect = saved.untiledRect ? new Meta.Rectangle(saved.untiledRect) : null;
-                    action = isFocused ? 'tile(focused)' : 'tile(fakeTile)';
                 } else {
                     win.move_resize_frame(true, saved.x, saved.y, saved.width, saved.height);
                     win.isTiled = saved.isTiled;
@@ -133,19 +120,23 @@ export default class WorkspaceRestoreExtension {
                         else
                             win.raise_and_make_recent();
                     }
-                    action = isFocused ? 'move+raise(focused)' : 'move+raise';
                 }
 
                 if (saved.minimized && !win.minimized) win.minimize();
                 else if (!saved.minimized && win.minimized) win.unminimize();
-
-                dbg.order.push({ id: saved.id, title, isFocused, action });
             }
 
-            try {
-                const f = Gio.File.new_for_path(GLib.get_home_dir() + '/.workspace-restore-debug.log');
-                f.replace_contents(JSON.stringify(dbg, null, 2), null, false, Gio.FileCreateFlags.REPLACE_DESTINATION, null);
-            } catch(e) {}
+            // Re-raise focused window after a short delay to win against async maximize
+            const focusedWin = state.focusedId ? winMap.get(state.focusedId) : null;
+            if (focusedWin && !focusedWin.minimized) {
+                GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                    if (focusedWin.raise_and_make_recent_on_workspace)
+                        focusedWin.raise_and_make_recent_on_workspace(global.workspace_manager.get_active_workspace());
+                    else
+                        focusedWin.raise_and_make_recent();
+                    return GLib.SOURCE_REMOVE;
+                });
+            }
 
             this.#restoreTimerId = null;
             return GLib.SOURCE_REMOVE;
@@ -153,13 +144,12 @@ export default class WorkspaceRestoreExtension {
     }
 
     disable() {
+        this.#disabled = true;
+        saveState();
+
         if (this.#restoreTimerId !== null) {
             GLib.source_remove(this.#restoreTimerId);
             this.#restoreTimerId = null;
-        }
-        if (this.#saveTimerId !== null) {
-            GLib.source_remove(this.#saveTimerId);
-            this.#saveTimerId = null;
         }
     }
 }

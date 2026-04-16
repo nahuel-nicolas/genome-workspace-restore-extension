@@ -8,10 +8,11 @@ A GNOME Shell extension that saves and restores your active workspace and window
 - **Restores window positions and sizes** — windows go back to where they were
 - **Restores tiled window layouts** — works with [tiling-assistant](https://github.com/Leleat/Tiling-Assistant) (Ubuntu's built-in tiling extension) to correctly restore split-screen arrangements, including non-equal splits
 - **Restores maximized and minimized states**
+- **Restores window focus** — the window you were using before locking comes back on top
 
 ## Why it exists
 
-On GNOME/Wayland, locking the screen can shuffle your active workspace and window positions. This extension persists your layout to disk every 10 seconds and restores it 1.2 seconds after unlock (giving the compositor time to settle).
+On GNOME/Wayland, locking the screen can shuffle your active workspace and window positions. This extension persists your layout to disk on every lock and restores it 1.2 seconds after unlock (giving the compositor time to settle).
 
 ## Requirements
 
@@ -23,28 +24,29 @@ On GNOME/Wayland, locking the screen can shuffle your active workspace and windo
 
 ```bash
 # Clone into the GNOME extensions directory
-git clone https://github.com/nahuel-nicolas/genome-workspace-restore-extension \
-  ~/.local/share/gnome-shell/extensions/workspace-restore@user
+git clone https://github.com/nahuel-nicolas/gnome-workspace-restore-extension \
+  ~/.local/share/gnome-shell/extensions/gnome-workspace-restore-extension@nahuel-nicolas.github.com
 
 # Log out and log back in (required for GNOME to pick up the new extension)
 
 # Enable the extension
-gnome-extensions enable workspace-restore@user
+gnome-extensions enable gnome-workspace-restore-extension@nahuel-nicolas.github.com
 ```
 
 ## How it works
 
-**Saving**: State is saved to `~/.workspace-restore-state` immediately on unlock and every 10 seconds while active. Saving happens in `enable()` (called on unlock) rather than `disable()` (called on lock) because GNOME modifies window geometry before `disable()` fires, which would capture incorrect positions.
+**Saving**: State is saved to `~/.workspace-restore-state` on every lock (`disable()` is called by GNOME when the screen locks). This captures the exact workspace, window positions, and focused window at the moment of locking.
 
-**Restoring**: On unlock, the saved state is loaded before the new state is written, then applied after a 1.2-second delay. For windows managed by tiling-assistant, `TilingWindowManager.tile()` is used directly — this correctly preserves the intended tile rectangle even when terminal emulators snap to character-cell-aligned sizes.
+**Restoring**: On unlock (`enable()` is called), the saved state is loaded and applied after a 1.2-second delay. For windows managed by tiling-assistant, `TilingWindowManager.tile()` is used directly — this correctly preserves the intended tile rectangle even when terminal emulators snap to character-cell-aligned sizes. The focused window is re-raised a second time after a short delay to win against any async maximize operations.
 
 ## State file
 
-`~/.workspace-restore-state` is a JSON file written on each save. Example:
+`~/.workspace-restore-state` is a JSON file written on each lock. Example:
 
 ```json
 {
   "activeWs": 1,
+  "focusedId": 123456,
   "windows": [
     {
       "id": 123456,
